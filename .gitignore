@@ -1,0 +1,30 @@
+# Build output
+Debug/
+Release/
+build/
+
+# Object files
+*.o
+*.d
+*.elf
+*.map
+*.lst
+*.hex
+*.bin
+
+# STM32CubeIDE
+.settings/
+.project
+.cproject
+.mxproject
+
+# Claude Code
+.claude/
+
+# PlatformIO
+esp_pnoid/.pio/
+esp_pnoid/sdkconfig.esp32c5
+
+# OS
+.DS_Store
+Thumbs.db
