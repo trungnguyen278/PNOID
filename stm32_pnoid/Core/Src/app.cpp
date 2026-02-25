@@ -12,6 +12,7 @@ extern "C" {
 
 /* ============== C++ Application Code ============== */
 
+static const char* TAG = "APP";
 namespace App {
 
 void init() {
@@ -22,7 +23,7 @@ void init() {
 void run() {
     // TODO: Add your C++ main loop code here
     while (1) {
-        LOG("Test log");
+        LOG(TAG, "Running main loop...");
         HAL_Delay(500);
     }
 }
