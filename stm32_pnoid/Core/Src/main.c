@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "app.hpp"
+#include "debug_log.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -37,7 +38,7 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
+static const char *TAG = "MAIN";
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -344,7 +345,10 @@ static void MX_SDMMC1_SD_Init(void)
   hsd1.Init.ClockDiv = 0;
   if (HAL_SD_Init(&hsd1) != HAL_OK)
   {
-    Error_Handler();
+    LOGW(TAG, "SDMMC1 init failed!");
+  }
+  else {
+    LOGI(TAG, "SDMMC1 init success!");
   }
   /* USER CODE BEGIN SDMMC1_Init 2 */
 
