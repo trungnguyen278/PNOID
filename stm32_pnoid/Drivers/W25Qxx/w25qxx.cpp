@@ -30,9 +30,13 @@ W25Qxx::Status W25Qxx::sendCommand(uint32_t instruction, uint32_t address,
     cmd.DdrMode           = QSPI_DDR_MODE_DISABLE;
     cmd.SIOOMode          = QSPI_SIOO_INST_EVERY_CMD;
 
-    if (HAL_QSPI_Command(&hqspi_, &cmd, TIMEOUT_DEFAULT) != HAL_OK)
+    HAL_StatusTypeDef hal_st = HAL_QSPI_Command(&hqspi_, &cmd, TIMEOUT_DEFAULT);
+    if (hal_st != HAL_OK)
+    {
+        LOGE(TAG, "QSPI cmd 0x%02lX failed: HAL=%d, State=%lu, Err=0x%08lX",
+             instruction, (int)hal_st, (uint32_t)hqspi_.State, hqspi_.ErrorCode);
         return Status::ErrInit;
-
+    }
     return Status::OK;
 }
 
@@ -97,17 +101,59 @@ W25Qxx::Status W25Qxx::waitBusy(uint32_t timeout)
 
 W25Qxx::Status W25Qxx::resetDevice()
 {
+    //LOGD(TAG, "resetDevice: starting...");
+
+    /* If flash is stuck in QPI mode from a previous run, send Exit QPI (0xFF)
+       on 4 lines first. We ignore errors here since the chip might not be
+       in QPI mode at all. */
+    {
+        QSPI_CommandTypeDef cmd{};
+        cmd.Instruction     = 0xFF; /* Exit QPI */
+        cmd.InstructionMode = QSPI_INSTRUCTION_4_LINES;
+        cmd.AddressMode     = QSPI_ADDRESS_NONE;
+        cmd.DataMode        = QSPI_DATA_NONE;
+        cmd.DummyCycles     = 0;
+        cmd.AlternateByteMode = QSPI_ALTERNATE_BYTES_NONE;
+        cmd.DdrMode         = QSPI_DDR_MODE_DISABLE;
+        cmd.SIOOMode        = QSPI_SIOO_INST_EVERY_CMD;
+        // HAL_StatusTypeDef r = HAL_QSPI_Command(&hqspi_, &cmd, 100);
+        //LOGD(TAG, "Exit QPI (4-line): %d", (int)r);
+    }
+
+    /* Also try reset on 4 lines (in case flash was in QPI mode) */
+    {
+        QSPI_CommandTypeDef cmd{};
+        cmd.InstructionMode = QSPI_INSTRUCTION_4_LINES;
+        cmd.AddressMode     = QSPI_ADDRESS_NONE;
+        cmd.DataMode        = QSPI_DATA_NONE;
+        cmd.DummyCycles     = 0;
+        cmd.AlternateByteMode = QSPI_ALTERNATE_BYTES_NONE;
+        cmd.DdrMode         = QSPI_DDR_MODE_DISABLE;
+        cmd.SIOOMode        = QSPI_SIOO_INST_EVERY_CMD;
+
+        cmd.Instruction = CMD_ENABLE_RESET;
+        // HAL_StatusTypeDef r1 = HAL_QSPI_Command(&hqspi_, &cmd, 100);
+        cmd.Instruction = CMD_RESET_DEVICE;
+        // HAL_StatusTypeDef r2 = HAL_QSPI_Command(&hqspi_, &cmd, 100);
+        //LOGD(TAG, "Reset 4-line: enable=%d, reset=%d", (int)r1, (int)r2);
+    }
+    HAL_Delay(5);
+
+    /* Now reset on 1 line (normal SPI mode) */
     auto st = sendCommand(CMD_ENABLE_RESET, 0,
                           QSPI_ADDRESS_NONE, QSPI_ADDRESS_24_BITS,
                           QSPI_DATA_NONE, 0, 0);
+    //LOGD(TAG, "Reset 1-line enable: %d", (int)st);
     if (st != Status::OK) return st;
 
     st = sendCommand(CMD_RESET_DEVICE, 0,
                      QSPI_ADDRESS_NONE, QSPI_ADDRESS_24_BITS,
                      QSPI_DATA_NONE, 0, 0);
+    //LOGD(TAG, "Reset 1-line device: %d", (int)st);
     if (st != Status::OK) return st;
 
-    HAL_Delay(1);
+    HAL_Delay(30); /* tRST max = 30us, use 30ms for safety */
+    //LOGD(TAG, "resetDevice: done");
     return Status::OK;
 }
 
@@ -145,6 +191,18 @@ W25Qxx::Status W25Qxx::enableQE()
 
 W25Qxx::Status W25Qxx::init()
 {
+    LOGI(TAG, "Starting init...");
+    //LOGD(TAG, "QSPI Instance: 0x%08lX", (uint32_t)hqspi_.Instance);
+    //LOGD(TAG, "QSPI State: %lu, ErrorCode: 0x%08lX",
+        //  (uint32_t)hqspi_.State, hqspi_.ErrorCode);
+    //LOGD(TAG, "QUADSPI->CR=0x%08lX, SR=0x%08lX",
+        //  QUADSPI->CR, QUADSPI->SR);
+
+    /* Abort any ongoing QSPI operation (e.g. memory-mapped mode from previous run) */
+    // HAL_StatusTypeDef abortSt = HAL_QSPI_Abort(&hqspi_);
+    //LOGD(TAG, "Abort result: %d, State after: %lu",
+        //  (int)abortSt, (uint32_t)hqspi_.State);
+
     auto st = resetDevice();
     if (st != Status::OK) {
         LOGE(TAG, "Reset failed");
@@ -153,8 +211,10 @@ W25Qxx::Status W25Qxx::init()
 
     uint32_t id = 0;
     st = readJEDECID(id);
-    if (st != Status::OK) return st;
-
+    if (st != Status::OK) {
+        LOGE(TAG, "Read JEDEC ID failed");
+        return st;
+    }
     LOGI(TAG, "JEDEC ID: 0x%06lX", id);
 
     if (id != JEDEC_ID) {
@@ -176,16 +236,35 @@ W25Qxx::Status W25Qxx::readJEDECID(uint32_t &id)
 {
     uint8_t buf[3]{};
 
+    //LOGD(TAG, "QSPI State before cmd: %lu, ErrorCode: 0x%08lX",
+        //  (uint32_t)hqspi_.State, hqspi_.ErrorCode);
+
     auto st = sendCommand(CMD_READ_JEDEC_ID, 0,
                           QSPI_ADDRESS_NONE, QSPI_ADDRESS_24_BITS,
                           QSPI_DATA_1_LINE, 0, 3);
-    if (st != Status::OK) return st;
+    if (st != Status::OK) {
+        LOGE(TAG, "Failed to send JEDEC ID command");
+        return st;
+    }
 
-    if (HAL_QSPI_Receive(&hqspi_, buf, TIMEOUT_DEFAULT) != HAL_OK)
+    //LOGD(TAG, "QSPI State after cmd: %lu, ErrorCode: 0x%08lX",(uint32_t)hqspi_.State, hqspi_.ErrorCode);
+
+    HAL_StatusTypeDef hal_st = HAL_QSPI_Receive(&hqspi_, buf, TIMEOUT_DEFAULT);
+    if (hal_st != HAL_OK)
+    {
+        LOGE(TAG, "HAL_QSPI_Receive failed: HAL_Status=%d", (int)hal_st);
+        LOGE(TAG, "  QSPI State: %lu, ErrorCode: 0x%08lX",
+             (uint32_t)hqspi_.State, hqspi_.ErrorCode);
+        LOGE(TAG, "  QUADSPI->SR=0x%08lX, CR=0x%08lX, CCR=0x%08lX",
+             QUADSPI->SR, QUADSPI->CR, QUADSPI->CCR);
+        LOGE(TAG, "  QUADSPI->DLR=0x%08lX, AR=0x%08lX",
+             QUADSPI->DLR, QUADSPI->AR);
         return Status::ErrRead;
+    }
 
     id = (static_cast<uint32_t>(buf[0]) << 16) |
          (static_cast<uint32_t>(buf[1]) << 8)  | buf[2];
+    LOGI(TAG, "Raw bytes: 0x%02X 0x%02X 0x%02X", buf[0], buf[1], buf[2]);
     return Status::OK;
 }
 
