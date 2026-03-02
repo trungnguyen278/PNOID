@@ -21,11 +21,39 @@ SDCard::SDCard(SD_HandleTypeDef &hsd) : hsd_(hsd) {}
 
 SDCard::Status SDCard::init()
 {
-    auto state = HAL_SD_GetCardState(&hsd_);
-    if (state == HAL_SD_CARD_ERROR) {
-        LOGE(TAG, "Card not detected");
+    LOGI(TAG, "Starting init...");
+
+    /* Populate hsd struct — actual HAL_SD_Init is done by BSP_SD_Init()
+       called from FatFs during f_mount(). We skip MX_SDMMC1_SD_Init()
+       in main.c to avoid Error_Handler when no SD card is inserted. */
+    hsd_.Instance                 = SDMMC1;
+    hsd_.Init.ClockEdge           = SDMMC_CLOCK_EDGE_RISING;
+    hsd_.Init.ClockPowerSave      = SDMMC_CLOCK_POWER_SAVE_DISABLE;
+    hsd_.Init.BusWide             = SDMMC_BUS_WIDE_1B;  /* Start 1-bit, switch to 4-bit after */
+    hsd_.Init.HardwareFlowControl = SDMMC_HARDWARE_FLOW_CONTROL_DISABLE;
+    hsd_.Init.ClockDiv            = 16;
+
+    //LOGD(TAG, "hsd struct populated, ClockDiv=%lu", hsd_.Init.ClockDiv);
+
+    /* Init in 1-bit mode first */
+    HAL_StatusTypeDef hal_st = HAL_SD_Init(&hsd_);
+    //LOGD(TAG, "HAL_SD_Init(1-bit): %d, ErrorCode=0x%08lX", (int)hal_st, hsd_.ErrorCode);
+    if (hal_st != HAL_OK) {
+        LOGW(TAG, "No SD card or init failed");
         return Status::ErrInit;
     }
+
+    /* Get card info */
+    HAL_SD_CardInfoTypeDef ci;
+    HAL_SD_GetCardInfo(&hsd_, &ci);
+    LOGI(TAG, "Card: type=%lu, size=%lu MB, blocks=%lu",
+         ci.CardType,
+         (uint32_t)(((uint64_t)ci.BlockNbr * ci.BlockSize) / (1024 * 1024)),
+         ci.BlockNbr);
+
+    /* Now switch card + peripheral to 4-bit bus */
+    hal_st = HAL_SD_ConfigWideBusOperation(&hsd_, SDMMC_BUS_WIDE_4B);
+    //LOGD(TAG, "WideBus 4-bit: %d, ErrorCode=0x%08lX", (int)hal_st, hsd_.ErrorCode);
 
     return mount();
 }
@@ -34,9 +62,10 @@ SDCard::Status SDCard::mount()
 {
     if (mounted_) return Status::OK;
 
+    //LOGD(TAG, "f_mount path='%s'", SDPath);
     FRESULT res = f_mount(&sd_fs, SDPath, 1);
     if (res != FR_OK) {
-        LOGE(TAG, "Mount failed: %d", res);
+        LOGE(TAG, "Mount failed: FRESULT=%d", (int)res);
         return Status::ErrMount;
     }
 
