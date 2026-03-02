@@ -18,11 +18,6 @@ AudioIn::AudioIn(I2SIn &i2s) : i2s_(i2s) {}
 
 AudioIn::Status AudioIn::init()
 {
-    if (i2s_.init() != I2SIn::Status::OK) {
-        LOGE(TAG, "I2S_IN driver init failed");
-        return Status::ErrInit;
-    }
-
     LOGI(TAG, "Init OK");
     return Status::OK;
 }
