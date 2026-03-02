@@ -12,7 +12,9 @@ extern "C" {
 #include "bsp.hpp"
 #include "w25qxx.hpp"
 #include "lcd.hpp"
-// #include "sdcard.hpp"   // Uncomment after enabling FATFS in CubeMX
+#include "sdcard.hpp"
+#include "i2s_out.hpp"
+#include "audio.hpp"
 // #include "camera.hpp"   // Uncomment when camera is connected
 
 /* ============== External HAL handles from main.c ============== */
@@ -22,16 +24,18 @@ extern SPI_HandleTypeDef  hspi2;
 extern SD_HandleTypeDef   hsd1;
 extern DCMI_HandleTypeDef hdcmi;
 extern I2C_HandleTypeDef  hi2c2;
+extern I2S_HandleTypeDef  hi2s1;
 
 /* ============== Driver instances ============== */
 
-static W25Qxx flash(hqspi);
-static LCD    lcd(hspi2,
-                  LCD_CS_GPIO_Port,  LCD_CS_Pin,
-                  LCD_D_C_GPIO_Port, LCD_D_C_Pin,
-                  LCD_BLK_GPIO_Port, LCD_BLK_Pin);
-
-// static SDCard  sd(hsd1);            // Uncomment after FATFS
+static W25Qxx  flash(hqspi);
+static LCD     lcd(hspi2,
+                   LCD_CS_GPIO_Port,  LCD_CS_Pin,
+                   LCD_D_C_GPIO_Port, LCD_D_C_Pin,
+                   LCD_BLK_GPIO_Port, LCD_BLK_Pin);
+static SDCard   sd(hsd1);
+static I2SOut   i2sOut(hi2s1);
+static AudioOut audioOut(i2sOut);
 // static Camera  cam(hdcmi, hi2c2);   // Uncomment when camera connected
 
 /* ============== Application ============== */
@@ -44,9 +48,26 @@ void init() {
     BSP::init();
     BSP::printSystemInfo();
 
+    /* Init SD Card — nếu có thì mount và bật SD logging */
+    if (sd.init() == SDCard::Status::OK) {
+        LOGI(TAG, "SD Card mounted");
+#if LOG_SD_ENABLE
+        if (LOG_SD_Init() == 0) {
+            LOGI(TAG, "SD logging enabled");
+        }
+#endif
+    } else {
+        LOGW(TAG, "SD Card not available, UART log only");
+    }
+
     /* Init QSPI Flash */
     if (flash.init() != W25Qxx::Status::OK) {
         LOGE(TAG, "W25Qxx init failed!");
+    }
+
+    /* Init Audio (I2S + PCM5102 DAC) */
+    if (audioOut.init() != AudioOut::Status::OK) {
+        LOGE(TAG, "Audio init failed!");
     }
 
     /* Init LCD */

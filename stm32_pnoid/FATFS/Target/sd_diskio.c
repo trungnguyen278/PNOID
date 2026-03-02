@@ -48,7 +48,7 @@
  * BSP_SD_Init() elsewhere in the application.
  */
 /* USER CODE BEGIN disableSDInit */
-/* #define DISABLE_SD_INIT */
+#define DISABLE_SD_INIT  /* SD init is handled in SDCard::init() (sdcard.cpp) */
 /* USER CODE END disableSDInit */
 
 /* Private variables ---------------------------------------------------------*/
@@ -82,7 +82,14 @@ const Diskio_drvTypeDef  SD_Driver =
 };
 
 /* USER CODE BEGIN beforeFunctionSection */
-/* can be used to modify / undefine following code or add new code */
+#include "debug_log.h"
+#include <string.h>
+extern SD_HandleTypeDef hsd1;
+static const char *SDIO_TAG = "SDIO";
+
+/* SDMMC IDMA on STM32H7 requires 32-byte aligned buffer */
+#define SD_BLOCK_SIZE 512
+__ALIGNED(32) static uint8_t sd_align_buf[SD_BLOCK_SIZE];
 /* USER CODE END beforeFunctionSection */
 
 /* Private functions ---------------------------------------------------------*/
