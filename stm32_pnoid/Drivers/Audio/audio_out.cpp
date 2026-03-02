@@ -58,11 +58,6 @@ void AudioOut::applyVolume(int16_t *sample) const
 
 AudioOut::Status AudioOut::init()
 {
-    if (i2s_.init() != I2SOut::Status::OK) {
-        LOGE(TAG, "I2S driver init failed");
-        return Status::ErrInit;
-    }
-
     LOGI(TAG, "Init OK (volume=%u%%)", volume_);
     return Status::OK;
 }

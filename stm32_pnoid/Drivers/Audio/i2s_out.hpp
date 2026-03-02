@@ -1,7 +1,7 @@
 /**
  * @file    i2s_out.hpp
  * @brief   Low-level I2S transmit driver for PCM5102 DAC (C++ OOP)
- * @note    Uses I2S1 (SPI1) in half-duplex master TX mode, DMA1_Stream1
+ * @note    Uses I2S1 (SPI1) full-duplex master mode, TX via DMA1_Stream1
  */
 
 #pragma once
