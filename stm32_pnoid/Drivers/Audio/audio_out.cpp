@@ -1,13 +1,13 @@
 /**
- * @file    audio.cpp
+ * @file    audio_out.cpp
  * @brief   High-level audio output implementation
  */
 
-#include "audio.hpp"
+#include "audio_out.hpp"
 #include "debug_log.h"
 #include <cstring>
 
-static const char *TAG = "AUDIO";
+static const char *TAG = "AUDIO_OUT";
 
 /* Quarter-wave sine table, 64 entries, amplitude 0..32767 */
 const uint16_t AudioOut::kSineTable[64] = {

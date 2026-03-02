@@ -1,5 +1,5 @@
 /**
- * @file    audio.hpp
+ * @file    audio_out.hpp
  * @brief   High-level audio output (tone generation, PCM playback, volume)
  * @note    Wraps I2SOut for easy audio output via PCM5102 DAC
  */
