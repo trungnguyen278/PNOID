@@ -1,12 +1,12 @@
 /**
  * @file    audio_out.hpp
  * @brief   High-level audio output (tone generation, PCM playback, volume)
- * @note    Wraps I2SOut for easy audio output via PCM5102 DAC
+ * @note    Wraps I2SIO for easy audio output via PCM5102 DAC
  */
 
 #pragma once
 
-#include "i2s_out.hpp"
+#include "i2s_io.hpp"
 #include <cstdint>
 
 class AudioOut {
@@ -18,11 +18,10 @@ public:
         ErrParam,
     };
 
-    explicit AudioOut(I2SOut &i2s);
+    explicit AudioOut(I2SIO &i2s);
 
     Status init();
 
-    Status playBuffer(const uint16_t *data, uint16_t samples, bool loop = false);
     Status playTone(uint32_t freqHz, uint32_t durationMs, uint8_t volume = 80);
     Status silence(uint32_t durationMs);
     Status stop();
@@ -33,7 +32,7 @@ public:
     bool isPlaying() const;
 
 private:
-    I2SOut &i2s_;
+    I2SIO &i2s_;
     uint8_t volume_ = 80;
 
     /* Sine lookup table (quarter-wave, 64 entries) */

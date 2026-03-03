@@ -1,12 +1,12 @@
 /**
  * @file    audio_in.hpp
  * @brief   High-level audio input (record, peak level, gain) for I2S mic
- * @note    Wraps I2SIn for easy microphone capture via I2S1 SDI (PB4)
+ * @note    Wraps I2SIO for easy microphone capture via I2S1 SDI (PB4)
  */
 
 #pragma once
 
-#include "i2s_in.hpp"
+#include "i2s_io.hpp"
 #include <cstdint>
 
 class AudioIn {
@@ -19,7 +19,7 @@ public:
         ErrBusy,
     };
 
-    explicit AudioIn(I2SIn &i2s);
+    explicit AudioIn(I2SIO &i2s);
 
     Status init();
 
@@ -29,18 +29,10 @@ public:
      * @param  samples  Number of mono samples to capture
      * @param  timeout  HAL timeout in ms
      * @return Status
-     * @note   I2S delivers stereo frames (L+R). This extracts the left channel.
+     * @note   I2S full-duplex delivers stereo frames (L+R).
+     *         This extracts the left channel into mono output.
      */
     Status record(int16_t *buf, uint32_t samples, uint32_t timeout = HAL_MAX_DELAY);
-
-    /**
-     * @brief  Start continuous DMA recording into a stereo buffer
-     * @param  buf      User-provided stereo buffer (L+R interleaved, uint16_t)
-     * @param  samples  Total number of uint16_t values (frames * 2)
-     * @return Status
-     * @note   Use registerCallback on I2SIn for half/complete notifications.
-     */
-    Status recordDMA(uint16_t *buf, uint16_t samples);
 
     Status stop();
 
@@ -58,7 +50,7 @@ public:
     bool isRecording() const;
 
 private:
-    I2SIn &i2s_;
+    I2SIO &i2s_;
 
     /* Internal stereo capture buffer for blocking record() */
     static constexpr uint32_t kBufFrames = 512;
