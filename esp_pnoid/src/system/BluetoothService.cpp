@@ -135,7 +135,8 @@ void BluetoothService::beginAdvertising() {
 
 void BluetoothService::onSync() {
     ESP_LOGI(TAG, "BLE host synced");
-    ble_hs_id_infer_auto(0, nullptr);
+    uint8_t addr_type;
+    ble_hs_id_infer_auto(0, &addr_type);
 }
 
 void BluetoothService::onReset(int reason) {
