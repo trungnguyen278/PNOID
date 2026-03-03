@@ -174,6 +174,37 @@ extern UART_HandleTypeDef huart1;
   #define LOGD(tag, fmt, ...) ((void)0)
 #endif
 
+/* ---------- UART Command Receiver ---------------------------------------- */
+
+#ifndef LOG_CMD_BUF_SIZE
+#define LOG_CMD_BUF_SIZE  64
+#endif
+
+/**
+ * @brief  Callback type: called when a complete command line is received
+ * @param  cmd  Null-terminated command string (trimmed of \r\n)
+ */
+typedef void (*LOG_CMD_Callback_t)(const char *cmd);
+
+/**
+ * @brief  Start UART RX interrupt for command input
+ * @note   Enables USART1 NVIC IRQ and starts byte-by-byte reception.
+ *         Call once after HAL_UART_Init.
+ */
+void LOG_CMD_Init(void);
+
+/**
+ * @brief  Register callback for received commands
+ * @param  cb  Function to call when a full line (\r or \n) is received
+ */
+void LOG_CMD_RegisterCallback(LOG_CMD_Callback_t cb);
+
+/**
+ * @brief  Poll for received commands (call from main loop)
+ * @note   Callbacks are invoked from this function (not from ISR).
+ */
+void LOG_CMD_Poll(void);
+
 /* ---------- Legacy compatibility ----------------------------------------- */
 #define LOG(tag, fmt, ...) LOGI(tag, fmt, ##__VA_ARGS__)
 
