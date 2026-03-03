@@ -5,12 +5,16 @@
 
 #include "i2s_in.hpp"
 #include "debug_log.h"
+#include <cstring>
 
 static const char *TAG = "I2S_IN";
 
 /* ---------- Singleton pointer for HAL callbacks -------------------------- */
 
 static I2SIn *g_rxInstance = nullptr;
+
+/* Silence buffer for TX during full-duplex receive (zeros → DAC outputs nothing) */
+static uint16_t txSilence[1024];
 
 /* ---------- Constructor -------------------------------------------------- */
 
@@ -42,14 +46,37 @@ I2SIn::Status I2SIn::init()
 
 I2SIn::Status I2SIn::receive(uint16_t *data, uint16_t samples, uint32_t timeout)
 {
+    /*
+     * Full-duplex master: TX must run to generate WS+CK clocks.
+     * Use HAL_I2SEx_TransmitReceive — TX sends zeros (silence on DAC),
+     * RX captures mic data simultaneously.
+     * Process in chunks of sizeof(txSilence)/sizeof(uint16_t) to limit stack.
+     */
+    const uint16_t chunkMax = sizeof(txSilence) / sizeof(uint16_t);
+    uint16_t remaining = samples;
+    uint16_t *pRx = data;
+
     recording_ = true;
-    HAL_StatusTypeDef st = HAL_I2S_Receive(&hi2s_, data, samples, timeout);
+
+    while (remaining > 0) {
+        uint16_t chunk = (remaining > chunkMax) ? chunkMax : remaining;
+
+        std::memset(txSilence, 0, chunk * sizeof(uint16_t));
+        HAL_StatusTypeDef st = HAL_I2SEx_TransmitReceive(&hi2s_,
+                                                          txSilence, pRx,
+                                                          chunk, timeout);
+        if (st != HAL_OK) {
+            recording_ = false;
+            if (st == HAL_BUSY)    return Status::ErrBusy;
+            if (st == HAL_TIMEOUT) return Status::ErrTimeout;
+            return Status::ErrDMA;
+        }
+
+        pRx       += chunk;
+        remaining -= chunk;
+    }
+
     recording_ = false;
-
-    if (st == HAL_BUSY)    return Status::ErrBusy;
-    if (st == HAL_TIMEOUT) return Status::ErrTimeout;
-    if (st != HAL_OK)      return Status::ErrDMA;
-
     return Status::OK;
 }
 

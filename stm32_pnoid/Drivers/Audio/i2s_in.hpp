@@ -2,7 +2,7 @@
  * @file    i2s_in.hpp
  * @brief   Low-level I2S receive driver for I2S microphone (C++ OOP)
  * @note    Uses I2S1 (SPI1) full-duplex mode, SDI on PB4.
- *          Blocking receive works immediately.
+ *          Full-duplex: blocking uses HAL_I2SEx_TransmitReceive (TX sends zeros).
  *          DMA receive requires SPI1_RX DMA stream configured in CubeMX.
  */
 
