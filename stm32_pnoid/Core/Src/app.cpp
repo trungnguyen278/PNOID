@@ -40,7 +40,7 @@ static SDCard   sd(hsd1);
 static I2SIO    i2s(hi2s1);
 static AudioOut audioOut(i2s);
 static PCA9685  servo1(hi2c1, 0x40);   // PCA9685 #1 (default addr)
-static PCA9685  servo2(hi2c1, 0x41);   // PCA9685 #2 (A0 soldered)
+static PCA9685  servo2(hi2c1, 0x42);   // PCA9685 #2 (A1 soldered)
 static BNO085   imu(hi2c1, 0x4A);      // BNO085 IMU
 // static Camera  cam(hdcmi, hi2c2);   // Uncomment when camera connected
 
@@ -84,47 +84,26 @@ void init() {
         lcd.drawString(20, 100, "PNOID Ready!", LCD::GREEN, LCD::BLACK);
     }
 
-    /* Init PCA9685 servo drivers */
-    if (servo1.init() != PCA9685::Status::OK) {
-        LOGE(TAG, "PCA9685 #1 (0x40) init failed!");
-    }
+    /* Test PCA9685 #2 (0x42) */
     if (servo2.init() != PCA9685::Status::OK) {
-        LOGE(TAG, "PCA9685 #2 (0x41) init failed!");
-    }
-
-    /* Init BNO085 IMU */
-    if (imu.init() != BNO085::Status::OK) {
-        LOGE(TAG, "BNO085 init failed!");
-    } else {
-        /* Enable rotation vector at 50Hz (20ms) */
-        imu.enableReport(BNO085::REPORT_ROTATION_VECTOR, 20000);
+        LOGE(TAG, "PCA9685 #2 (0x42) init failed!");
     }
 
     LOGI(TAG, "All peripherals initialized");
 }
 
 void run() {
-    uint32_t lastImuLog = 0;
+    /* Mỗi kênh hold 1 góc: 0→45→90→135→180 lặp lại */
+    static const uint16_t angles[] = { 0, 45, 90, 135, 180 };
+    for (uint8_t ch = 0; ch < 16; ch++) {
+        uint16_t angle = angles[ch % 5];
+        servo2.setAngle(ch, angle);
+        LOGI(TAG, "CH%u = %u deg", ch, angle);
+    }
 
     while (1) {
         BSP::ledToggle();
-
-        /* Poll BNO085 for new data */
-        if (imu.poll() == BNO085::Status::OK) {
-            /* Log euler angles every 500ms (avoid flooding) */
-            if ((HAL_GetTick() - lastImuLog) >= 500) {
-                auto e = imu.getEuler();
-                LOGI(TAG, "IMU: R=%.1f P=%.1f Y=%.1f",
-                     (double)e.roll, (double)e.pitch, (double)e.yaw);
-                lastImuLog = HAL_GetTick();
-            }
-        }
-
-        if (BSP::buttonPressed(BSP::Button::K1)) {
-            LOGI(TAG, "K1 pressed");
-        }
-
-        HAL_Delay(10);
+        HAL_Delay(500);
     }
 }
 
