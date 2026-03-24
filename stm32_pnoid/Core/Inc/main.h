@@ -71,6 +71,8 @@ void Error_Handler(void);
 #define LCD_BLK_GPIO_Port GPIOB
 #define LCD_D_C_Pin GPIO_PIN_1
 #define LCD_D_C_GPIO_Port GPIOB
+#define SPI4_CS_Pin GPIO_PIN_11
+#define SPI4_CS_GPIO_Port GPIOE
 #define LCD_CS_Pin GPIO_PIN_12
 #define LCD_CS_GPIO_Port GPIOB
 #define MUX_S0_Pin GPIO_PIN_4
