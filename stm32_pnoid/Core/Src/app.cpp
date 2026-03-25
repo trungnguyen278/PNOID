@@ -16,7 +16,7 @@ extern "C" {
 #include "i2s_io.hpp"
 #include "audio_out.hpp"
 #include "pca9685.hpp"
-#include "bno085.hpp"
+#include "icm20948.hpp"
 // #include "camera.hpp"   // Uncomment when camera is connected
 
 /* ============== External HAL handles from main.c ============== */
@@ -39,9 +39,9 @@ static LCD     lcd(hspi2,
 static SDCard   sd(hsd1);
 static I2SIO    i2s(hi2s1);
 static AudioOut audioOut(i2s);
-static PCA9685  servo1(hi2c1, 0x40);   // PCA9685 #1 (default addr)
+static PCA9685  servo1(hi2c1, 0x41);   // PCA9685 #1 (A0 soldered)
 static PCA9685  servo2(hi2c1, 0x42);   // PCA9685 #2 (A1 soldered)
-static BNO085   imu(hi2c1, 0x4A);      // BNO085 IMU
+static ICM20948 imu(hi2c1, 0x68);      // ICM-20948 IMU
 // static Camera  cam(hdcmi, hi2c2);   // Uncomment when camera connected
 
 /* ============== Application ============== */
@@ -84,26 +84,66 @@ void init() {
         lcd.drawString(20, 100, "PNOID Ready!", LCD::GREEN, LCD::BLACK);
     }
 
-    /* Test PCA9685 #2 (0x42) */
+    /* Scan I2C1 */
+    LOGI(TAG, "Scanning I2C1...");
+    for (uint8_t a = 0x08; a < 0x78; a++) {
+        if (HAL_I2C_IsDeviceReady(&hi2c1, a << 1, 1, 10) == HAL_OK)
+            LOGI(TAG, "  0x%02X found", a);
+    }
+
+    /* Init PCA9685 servo drivers */
+    if (servo1.init() != PCA9685::Status::OK) {
+        LOGE(TAG, "PCA9685 #1 (0x41) init failed!");
+    }
     if (servo2.init() != PCA9685::Status::OK) {
         LOGE(TAG, "PCA9685 #2 (0x42) init failed!");
+    }
+
+    /* Init ICM-20948 IMU */
+    if (imu.init() != ICM20948::Status::OK) {
+        LOGE(TAG, "ICM-20948 init failed!");
     }
 
     LOGI(TAG, "All peripherals initialized");
 }
 
 void run() {
-    /* Mỗi kênh hold 1 góc: 0→45→90→135→180 lặp lại */
-    static const uint16_t angles[] = { 0, 45, 90, 135, 180 };
+    /* Set cả 2 PCA: mỗi kênh hold 0→90→180 lặp lại */
+    static const uint16_t angles[] = { 0, 90, 180 };
+    LOGI(TAG, "--- PCA9685 #1 (0x41) ---");
     for (uint8_t ch = 0; ch < 16; ch++) {
-        uint16_t angle = angles[ch % 5];
+        uint16_t angle = angles[ch % 3];
+        servo1.setAngle(ch, angle);
+        LOGI(TAG, "  CH%u = %u deg", ch, angle);
+    }
+    LOGI(TAG, "--- PCA9685 #2 (0x42) ---");
+    for (uint8_t ch = 0; ch < 16; ch++) {
+        uint16_t angle = angles[ch % 3];
         servo2.setAngle(ch, angle);
-        LOGI(TAG, "CH%u = %u deg", ch, angle);
+        LOGI(TAG, "  CH%u = %u deg", ch, angle);
     }
 
+    /* Main loop: poll BNO085 */
+    uint32_t lastImuLog = 0;
     while (1) {
         BSP::ledToggle();
-        HAL_Delay(500);
+
+        if ((HAL_GetTick() - lastImuLog) >= 500) {
+            if (imu.read() == ICM20948::Status::OK) {
+                auto e = imu.getEuler();
+                auto a = imu.getAccel();
+                LOGI(TAG, "R=%d.%d P=%d.%d Y=%d.%d T=%d.%d",
+                     (int)e.roll, abs((int)(e.roll * 10) % 10),
+                     (int)e.pitch, abs((int)(e.pitch * 10) % 10),
+                     (int)e.yaw, abs((int)(e.yaw * 10) % 10),
+                     (int)imu.getTemp(), abs((int)(imu.getTemp() * 10) % 10));
+                LOGI(TAG, "Ax=%d Ay=%d Az=%d mg",
+                     (int)(a.x * 1000), (int)(a.y * 1000), (int)(a.z * 1000));
+            }
+            lastImuLog = HAL_GetTick();
+        }
+
+        HAL_Delay(10);
     }
 }
 
