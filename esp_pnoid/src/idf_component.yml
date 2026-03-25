@@ -1,3 +1,2 @@
 dependencies:
-  espressif/esp_websocket_client:
-    version: "~1.2.0"
+  espressif/esp_websocket_client: ">=1.0.0"

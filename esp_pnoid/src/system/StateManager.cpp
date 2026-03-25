@@ -1,123 +1,152 @@
-#include "system/StateManager.h"
+#include "StateManager.hpp"
 #include "esp_log.h"
 #include <algorithm>
 
-static const char* TAG = "StateManager";
-
-// ============================================================================
-// toString helpers
-// ============================================================================
-
-const char* toString(ConnectivityState s) {
-    switch (s) {
-        case ConnectivityState::OFFLINE:         return "OFFLINE";
-        case ConnectivityState::CONNECTING_WIFI:  return "CONNECTING_WIFI";
-        case ConnectivityState::WIFI_PORTAL:      return "WIFI_PORTAL";
-        case ConnectivityState::CONFIG_BLE:       return "CONFIG_BLE";
-        case ConnectivityState::CONNECTING_WS:    return "CONNECTING_WS";
-        case ConnectivityState::ONLINE:           return "ONLINE";
-        default:                                  return "UNKNOWN";
-    }
-}
-
-const char* toString(SystemState s) {
-    switch (s) {
-        case SystemState::BOOTING:           return "BOOTING";
-        case SystemState::RUNNING:           return "RUNNING";
-        case SystemState::ERROR:             return "ERROR";
-        case SystemState::UPDATING_FIRMWARE: return "UPDATING_FIRMWARE";
-        default:                             return "UNKNOWN";
-    }
-}
-
-// ============================================================================
-// StateManager
-// ============================================================================
-
-StateManager::StateManager() {
-    mutex_ = xSemaphoreCreateMutex();
-}
+static const char *TAG = "StateManager";
 
 StateManager& StateManager::instance() {
     static StateManager inst;
     return inst;
 }
 
-void StateManager::setConnectivity(ConnectivityState s) {
-    std::vector<ConnSub> subs;
+// === Interaction ===
+
+void StateManager::setInteractionState(state::InteractionState s, state::InputSource src) {
+    std::vector<std::pair<int, InteractionCb>> callbacks;
     {
-        xSemaphoreTake(mutex_, portMAX_DELAY);
-        if (connectivity_ == s) { xSemaphoreGive(mutex_); return; }
-        ESP_LOGI(TAG, "Connectivity: %s -> %s", toString(connectivity_), toString(s));
-        connectivity_ = s;
-        subs = conn_subs_;  // copy under lock
-        xSemaphoreGive(mutex_);
+        std::lock_guard<std::mutex> lk(mtx);
+        if (s == interaction_state && src == interaction_source) return;
+        ESP_LOGI(TAG, "Interaction: %d -> %d (source=%d)",
+                 (int)interaction_state, (int)s, (int)src);
+        interaction_state = s;
+        interaction_source = src;
+        callbacks = interaction_cbs;
     }
-    // Call callbacks OUTSIDE lock (prevents deadlock, same as PTalk)
-    for (auto& sub : subs) {
-        sub.cb(s);
-    }
+    for (auto &p : callbacks) { if (p.second) p.second(s, src); }
 }
 
-void StateManager::setSystem(SystemState s) {
-    std::vector<SysSub> subs;
-    {
-        xSemaphoreTake(mutex_, portMAX_DELAY);
-        if (system_ == s) { xSemaphoreGive(mutex_); return; }
-        ESP_LOGI(TAG, "System: %s -> %s", toString(system_), toString(s));
-        system_ = s;
-        subs = sys_subs_;
-        xSemaphoreGive(mutex_);
-    }
-    for (auto& sub : subs) {
-        sub.cb(s);
-    }
+state::InteractionState StateManager::getInteractionState() {
+    std::lock_guard<std::mutex> lk(mtx);
+    return interaction_state;
 }
 
-ConnectivityState StateManager::getConnectivity() {
-    xSemaphoreTake(mutex_, portMAX_DELAY);
-    auto s = connectivity_;
-    xSemaphoreGive(mutex_);
-    return s;
+state::InputSource StateManager::getInteractionSource() {
+    std::lock_guard<std::mutex> lk(mtx);
+    return interaction_source;
 }
 
-SystemState StateManager::getSystem() {
-    xSemaphoreTake(mutex_, portMAX_DELAY);
-    auto s = system_;
-    xSemaphoreGive(mutex_);
-    return s;
-}
-
-int StateManager::subscribeConnectivity(ConnectivityCb cb) {
-    xSemaphoreTake(mutex_, portMAX_DELAY);
-    int id = next_id_++;
-    conn_subs_.push_back({id, std::move(cb)});
-    xSemaphoreGive(mutex_);
+int StateManager::subscribeInteraction(InteractionCb cb) {
+    std::lock_guard<std::mutex> lk(mtx);
+    int id = next_sub_id++;
+    interaction_cbs.emplace_back(id, std::move(cb));
     return id;
 }
 
-int StateManager::subscribeSystem(SystemCb cb) {
-    xSemaphoreTake(mutex_, portMAX_DELAY);
-    int id = next_id_++;
-    sys_subs_.push_back({id, std::move(cb)});
-    xSemaphoreGive(mutex_);
+void StateManager::unsubscribeInteraction(int id) {
+    std::lock_guard<std::mutex> lk(mtx);
+    interaction_cbs.erase(
+        std::remove_if(interaction_cbs.begin(), interaction_cbs.end(),
+            [id](auto &p){ return p.first == id; }),
+        interaction_cbs.end());
+}
+
+// === Connectivity ===
+
+void StateManager::setConnectivityState(state::ConnectivityState s) {
+    std::vector<std::pair<int, ConnectivityCb>> callbacks;
+    {
+        std::lock_guard<std::mutex> lk(mtx);
+        if (s == connectivity_state) return;
+        ESP_LOGI(TAG, "Connectivity: %d -> %d", (int)connectivity_state, (int)s);
+        connectivity_state = s;
+        callbacks = connectivity_cbs;
+    }
+    for (auto &p : callbacks) { if (p.second) p.second(s); }
+}
+
+state::ConnectivityState StateManager::getConnectivityState() {
+    std::lock_guard<std::mutex> lk(mtx);
+    return connectivity_state;
+}
+
+int StateManager::subscribeConnectivity(ConnectivityCb cb) {
+    std::lock_guard<std::mutex> lk(mtx);
+    int id = next_sub_id++;
+    connectivity_cbs.emplace_back(id, std::move(cb));
     return id;
 }
 
 void StateManager::unsubscribeConnectivity(int id) {
-    xSemaphoreTake(mutex_, portMAX_DELAY);
-    conn_subs_.erase(
-        std::remove_if(conn_subs_.begin(), conn_subs_.end(),
-            [id](const ConnSub& s) { return s.id == id; }),
-        conn_subs_.end());
-    xSemaphoreGive(mutex_);
+    std::lock_guard<std::mutex> lk(mtx);
+    connectivity_cbs.erase(
+        std::remove_if(connectivity_cbs.begin(), connectivity_cbs.end(),
+            [id](auto &p){ return p.first == id; }),
+        connectivity_cbs.end());
+}
+
+// === System ===
+
+void StateManager::setSystemState(state::SystemState s) {
+    std::vector<std::pair<int, SystemCb>> callbacks;
+    {
+        std::lock_guard<std::mutex> lk(mtx);
+        if (s == system_state) return;
+        ESP_LOGI(TAG, "System: %d -> %d", (int)system_state, (int)s);
+        system_state = s;
+        callbacks = system_cbs;
+    }
+    for (auto &p : callbacks) { if (p.second) p.second(s); }
+}
+
+state::SystemState StateManager::getSystemState() {
+    std::lock_guard<std::mutex> lk(mtx);
+    return system_state;
+}
+
+int StateManager::subscribeSystem(SystemCb cb) {
+    std::lock_guard<std::mutex> lk(mtx);
+    int id = next_sub_id++;
+    system_cbs.emplace_back(id, std::move(cb));
+    return id;
 }
 
 void StateManager::unsubscribeSystem(int id) {
-    xSemaphoreTake(mutex_, portMAX_DELAY);
-    sys_subs_.erase(
-        std::remove_if(sys_subs_.begin(), sys_subs_.end(),
-            [id](const SysSub& s) { return s.id == id; }),
-        sys_subs_.end());
-    xSemaphoreGive(mutex_);
+    std::lock_guard<std::mutex> lk(mtx);
+    system_cbs.erase(
+        std::remove_if(system_cbs.begin(), system_cbs.end(),
+            [id](auto &p){ return p.first == id; }),
+        system_cbs.end());
+}
+
+// === Emotion ===
+
+void StateManager::setEmotionState(state::EmotionState s) {
+    std::vector<std::pair<int, EmotionCb>> callbacks;
+    {
+        std::lock_guard<std::mutex> lk(mtx);
+        emotion_state = s;
+        ESP_LOGI(TAG, "Emotion: %d", (int)s);
+        callbacks = emotion_cbs;
+    }
+    for (auto &p : callbacks) { if (p.second) p.second(s); }
+}
+
+state::EmotionState StateManager::getEmotionState() {
+    std::lock_guard<std::mutex> lk(mtx);
+    return emotion_state;
+}
+
+int StateManager::subscribeEmotion(EmotionCb cb) {
+    std::lock_guard<std::mutex> lk(mtx);
+    int id = next_sub_id++;
+    emotion_cbs.emplace_back(id, std::move(cb));
+    return id;
+}
+
+void StateManager::unsubscribeEmotion(int id) {
+    std::lock_guard<std::mutex> lk(mtx);
+    emotion_cbs.erase(
+        std::remove_if(emotion_cbs.begin(), emotion_cbs.end(),
+            [id](auto &p){ return p.first == id; }),
+        emotion_cbs.end());
 }

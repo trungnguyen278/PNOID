@@ -1,0 +1,6 @@
+# Name,   Type, SubType, Offset,  Size,    Flags
+# 4MB layout (NO OTA - single app, 3.7MB app, 320KB SPIFFS for config/logs only)
+nvs,      data, nvs,     0x9000,  0x5000,
+phy_init, data, phy,     0xe000,  0x1000,
+factory,  app,  factory, 0x10000, 0x3A0000,
+spiffs,   data, spiffs,  0x3B0000, 0x50000,

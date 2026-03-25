@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2015-2023 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2015-2025 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -14,11 +14,19 @@
 #include "freertos/FreeRTOS.h"
 #include "esp_err.h"
 #include "esp_event.h"
+#include "esp_idf_version.h"
 #include <sys/socket.h>
 #include "esp_transport_ws.h"
 
 #ifdef __cplusplus
 extern "C" {
+#endif
+
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+// Features supported in 6.0.0
+#define WS_TRANSPORT_HEADER_CALLBACK_SUPPORT    1
+#else
+#define WS_TRANSPORT_HEADER_CALLBACK_SUPPORT    0
 #endif
 
 typedef struct esp_websocket_client *esp_websocket_client_handle_t;
@@ -31,11 +39,16 @@ ESP_EVENT_DECLARE_BASE(WEBSOCKET_EVENTS);         // declaration of the task eve
 typedef enum {
     WEBSOCKET_EVENT_ANY = -1,
     WEBSOCKET_EVENT_ERROR = 0,      /*!< This event occurs when there are any errors during execution */
+#if WS_TRANSPORT_HEADER_CALLBACK_SUPPORT
+    WEBSOCKET_EVENT_HEADER_RECEIVED,/*!< This event occurs for each pre-upgrade HTTP header */
+#endif
     WEBSOCKET_EVENT_CONNECTED,      /*!< Once the Websocket has been connected to the server, no data exchange has been performed */
     WEBSOCKET_EVENT_DISCONNECTED,   /*!< The connection has been disconnected */
     WEBSOCKET_EVENT_DATA,           /*!< When receiving data from the server, possibly multiple portions of the packet */
     WEBSOCKET_EVENT_CLOSED,         /*!< The connection has been closed cleanly */
     WEBSOCKET_EVENT_BEFORE_CONNECT, /*!< The event occurs before connecting */
+    WEBSOCKET_EVENT_BEGIN,          /*!< The event occurs once after thread creation, before event loop */
+    WEBSOCKET_EVENT_FINISH,         /*!< The event occurs once after event loop, before thread destruction */
     WEBSOCKET_EVENT_MAX
 } esp_websocket_event_id_t;
 
@@ -46,7 +59,8 @@ typedef enum {
     WEBSOCKET_ERROR_TYPE_NONE = 0,
     WEBSOCKET_ERROR_TYPE_TCP_TRANSPORT,
     WEBSOCKET_ERROR_TYPE_PONG_TIMEOUT,
-    WEBSOCKET_ERROR_TYPE_HANDSHAKE
+    WEBSOCKET_ERROR_TYPE_HANDSHAKE,
+    WEBSOCKET_ERROR_TYPE_SERVER_CLOSE
 } esp_websocket_error_type_t;
 
 /**
@@ -99,6 +113,7 @@ typedef struct {
     const char                  *password;                  /*!< Using for Http authentication */
     const char                  *path;                      /*!< HTTP Path, if not set, default is `/` */
     bool                        disable_auto_reconnect;     /*!< Disable the automatic reconnect function when disconnected */
+    bool                        enable_close_reconnect;     /*!< Enable reconnect after server close */
     void                        *user_context;              /*!< HTTP user data context */
     int                         task_prio;                  /*!< Websocket task priority */
     const char                 *task_name;                  /*!< Websocket task name */
@@ -106,10 +121,13 @@ typedef struct {
     int                         buffer_size;                /*!< Websocket buffer size */
     const char                  *cert_pem;                  /*!< Pointer to certificate data in PEM or DER format for server verify (with SSL), default is NULL, not required to verify the server. PEM-format must have a terminating NULL-character. DER-format requires the length to be passed in cert_len. */
     size_t                      cert_len;                   /*!< Length of the buffer pointed to by cert_pem. May be 0 for null-terminated pem */
-    const char                  *client_cert;               /*!< Pointer to certificate data in PEM or DER format for SSL mutual authentication, default is NULL, not required if mutual authentication is not needed. If it is not NULL, also `client_key` has to be provided. PEM-format must have a terminating NULL-character. DER-format requires the length to be passed in client_cert_len. */
+    const char                  *client_cert;               /*!< Pointer to certificate data in PEM or DER format for SSL mutual authentication, default is NULL, not required if mutual authentication is not needed. If it is not NULL, also `client_key` or `client_ds_data` (if supported) has to be provided. PEM-format must have a terminating NULL-character. DER-format requires the length to be passed in client_cert_len. */
     size_t                      client_cert_len;            /*!< Length of the buffer pointed to by client_cert. May be 0 for null-terminated pem */
-    const char                  *client_key;                /*!< Pointer to private key data in PEM or DER format for SSL mutual authentication, default is NULL, not required if mutual authentication is not needed. If it is not NULL, also `client_cert` has to be provided. PEM-format must have a terminating NULL-character. DER-format requires the length to be passed in client_key_len */
+    const char                  *client_key;                /*!< Pointer to private key data in PEM or DER format for SSL mutual authentication, default is NULL, not required if mutual authentication is not needed. If it is not NULL, also `client_cert` has to be provided and `client_ds_data` (if supported) gets ignored. PEM-format must have a terminating NULL-character. DER-format requires the length to be passed in client_key_len */
     size_t                      client_key_len;             /*!< Length of the buffer pointed to by client_key_pem. May be 0 for null-terminated pem */
+#if CONFIG_ESP_TLS_USE_DS_PERIPHERAL
+    void                        *client_ds_data;            /*!< Pointer to the encrypted private key data for SSL mutual authentication using the DS peripheral, default is NULL, not required if mutual authentication is not needed. If it is not NULL, also `client_cert` has to be provided. It is ignored if `client_key` is provided */
+#endif
     esp_websocket_transport_t   transport;                  /*!< Websocket transport type, see `esp_websocket_transport_t */
     const char                  *subprotocol;               /*!< Websocket subprotocol */
     const char                  *user_agent;                /*!< Websocket user-agent */
@@ -118,6 +136,7 @@ typedef struct {
     bool                        disable_pingpong_discon;    /*!< Disable auto-disconnect due to no PONG received within pingpong_timeout_sec */
     bool                        use_global_ca_store;        /*!< Use a global ca_store for all the connections in which this bool is set. */
     esp_err_t (*crt_bundle_attach)(void *conf);             /*!< Function pointer to esp_crt_bundle_attach. Enables the use of certification bundle for server verification, MBEDTLS_CERTIFICATE_BUNDLE must be enabled in menuconfig. Include esp_crt_bundle.h, and use `esp_crt_bundle_attach` here to include bundled CA certificates. */
+    const char                  *cert_common_name;          /*!< Expected common name of the server certificate */
     bool                        skip_cert_common_name_check;/*!< Skip any validation of server certificate CN field */
     bool                        keep_alive_enable;          /*!< Enable keep-alive timeout */
     int                         keep_alive_idle;            /*!< Keep-alive idle time. Default is 5 (second) */
@@ -127,6 +146,7 @@ typedef struct {
     int                         network_timeout_ms;         /*!< Abort network operation if it is not completed after this value, in milliseconds (defaults to 10s) */
     size_t                      ping_interval_sec;          /*!< Websocket ping interval, defaults to 10 seconds if not set */
     struct ifreq                *if_name;                   /*!< The name of interface for data to go through. Use the default interface without setting */
+    esp_transport_handle_t      ext_transport;              /*!< External WebSocket tcp_transport handle to the client; or if null, the client will create its own transport handle. */
 } esp_websocket_client_config_t;
 
 /**
@@ -417,6 +437,29 @@ size_t esp_websocket_client_get_ping_interval_sec(esp_websocket_client_handle_t 
 esp_err_t esp_websocket_client_set_ping_interval_sec(esp_websocket_client_handle_t client, size_t ping_interval_sec);
 
 /**
+ * @brief      Get the next reconnect timeout for client. Returns -1 when client is not initialized or automatic reconnect is disabled.
+ *
+ * @param[in]  client             The client
+ *
+ * @return     Reconnect timeout in msec
+ */
+int esp_websocket_client_get_reconnect_timeout(esp_websocket_client_handle_t client);
+
+/**
+ * @brief      Set next reconnect timeout for client.
+ *
+ *  Notes:
+ *  - Changing this value when reconnection delay is already active does not immediately affect the active delay and may have unexpected result.
+ *  - Good place to change this value is when handling WEBSOCKET_EVENT_DISCONNECTED or WEBSOCKET_EVENT_ERROR events.
+ *
+ * @param[in]  client             The client
+ * @param[in]  reconnect_timeout_ms  The new timeout
+ *
+ * @return     esp_err_t
+ */
+esp_err_t esp_websocket_client_set_reconnect_timeout(esp_websocket_client_handle_t client, int reconnect_timeout_ms);
+
+/**
  * @brief Register the Websocket Events
  *
  * @param client            The client handle
@@ -429,6 +472,18 @@ esp_err_t esp_websocket_register_events(esp_websocket_client_handle_t client,
                                         esp_websocket_event_id_t event,
                                         esp_event_handler_t event_handler,
                                         void *event_handler_arg);
+
+/**
+ * @brief Unegister the Websocket Events
+ *
+ * @param client            The client handle
+ * @param event             The event id
+ * @param event_handler     The callback function
+ * @return esp_err_t
+ */
+esp_err_t esp_websocket_unregister_events(esp_websocket_client_handle_t client,
+                                          esp_websocket_event_id_t event,
+                                          esp_event_handler_t event_handler);
 
 #ifdef __cplusplus
 }

@@ -1,7 +1,5 @@
-idf_component_register(SRCS "main.c"
-                    INCLUDE_DIRS
-                    "."
-                    REQUIRES esp_websocket_client protocol_examples_common)
+idf_component_register(SRCS "websocket_linux.c"
+                    REQUIRES esp_websocket_client protocol_examples_common esp_netif)
 
 if(CONFIG_GCOV_ENABLED)
     target_compile_options(${COMPONENT_LIB} PUBLIC --coverage -fprofile-arcs -ftest-coverage)

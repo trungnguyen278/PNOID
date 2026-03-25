@@ -1,132 +1,222 @@
-#include "AppController.h"
-#include "system/StateManager.h"
-#include "config/AppConfig.h"
-#include "nvs_flash.h"
+#include "AppController.hpp"
+#include "system/NetworkManager.hpp"
+#include "system/SpiBridge.hpp"
+#include "system/UartBridge.hpp"
+
 #include "esp_log.h"
+#include <utility>
 
 static const char* TAG = "AppController";
 
-AppController& AppController::instance() {
+struct AppMessage {
+    enum class Type : uint8_t {
+        INTERACTION,
+        CONNECTIVITY,
+        SYSTEM,
+        APP_EVENT
+    } type;
+
+    state::InteractionState  interaction_state;
+    state::InputSource       interaction_source;
+    state::ConnectivityState connectivity_state;
+    state::SystemState       system_state;
+    event::AppEvent          app_event;
+};
+
+// === Singleton ===
+
+AppController& AppController::instance()
+{
     static AppController inst;
     return inst;
 }
 
-void AppController::init() {
-    ESP_LOGI(TAG, "========================================");
-    ESP_LOGI(TAG, "  PNOID Robot - Connectivity Module");
-    ESP_LOGI(TAG, "  ESP32-C5 Co-Processor");
-    ESP_LOGI(TAG, "========================================");
+AppController::~AppController()
+{
+    stop();
+    auto& sm = StateManager::instance();
+    if (sub_inter_id != -1) sm.unsubscribeInteraction(sub_inter_id);
+    if (sub_conn_id != -1)  sm.unsubscribeConnectivity(sub_conn_id);
+    if (sub_sys_id != -1)   sm.unsubscribeSystem(sub_sys_id);
+    if (app_queue) { vQueueDelete(app_queue); app_queue = nullptr; }
+}
 
-    // NVS init
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_LOGW(TAG, "NVS truncated, erasing...");
-        nvs_flash_erase();
-        nvs_flash_init();
+// === Module attachment ===
+
+void AppController::attachModules(std::unique_ptr<NetworkManager> networkIn,
+                                   std::unique_ptr<SpiBridge> spiIn,
+                                   std::unique_ptr<UartBridge> uartIn)
+{
+    if (started.load()) return;
+    network = std::move(networkIn);
+    spi     = std::move(spiIn);
+    uart    = std::move(uartIn);
+}
+
+// === Lifecycle ===
+
+bool AppController::init()
+{
+    ESP_LOGI(TAG, "init()");
+
+    app_queue = xQueueCreate(16, sizeof(AppMessage));
+    if (!app_queue) {
+        ESP_LOGE(TAG, "Failed to create queue");
+        return false;
     }
 
-    StateManager::instance().setSystem(SystemState::BOOTING);
+    auto& sm = StateManager::instance();
 
-    // Subscribe to connectivity changes
-    StateManager::instance().subscribeConnectivity(
-        [this](ConnectivityState s) { onConnectivityChanged(s); });
+    sub_inter_id = sm.subscribeInteraction(
+        [this](state::InteractionState s, state::InputSource src) {
+            AppMessage msg{}; msg.type = AppMessage::Type::INTERACTION;
+            msg.interaction_state = s; msg.interaction_source = src;
+            if (app_queue) xQueueSend(app_queue, &msg, 0);
+        });
 
-    // Init modules
-    uart_.init();
-    network_.init();
-    ble_.init();
+    sub_conn_id = sm.subscribeConnectivity(
+        [this](state::ConnectivityState s) {
+            AppMessage msg{}; msg.type = AppMessage::Type::CONNECTIVITY;
+            msg.connectivity_state = s;
+            if (app_queue) xQueueSend(app_queue, &msg, 0);
+        });
 
-    // Wire server → STM32 data forwarding
-    network_.onWsText([this](const std::string& msg) {
-        uart_.sendString(msg + "\n");
-    });
-    network_.onWsBinary([this](const uint8_t* data, size_t len) {
-        uart_.send(data, len);
-    });
-    network_.onMqttMessage([this](const std::string& topic, const std::string& payload) {
-        // Forward as "MQTT:<topic>:<payload>\n"
-        uart_.sendString("MQTT:" + topic + ":" + payload + "\n");
-    });
+    sub_sys_id = sm.subscribeSystem(
+        [this](state::SystemState s) {
+            AppMessage msg{}; msg.type = AppMessage::Type::SYSTEM;
+            msg.system_state = s;
+            if (app_queue) xQueueSend(app_queue, &msg, 0);
+        });
 
-    // Wire STM32 → server data forwarding
-    uart_.onReceive([this](const uint8_t* data, size_t len) {
-        std::string msg((const char*)data, len);
-        // Forward to server via MQTT telemetry
-        if (network_.mqtt().isConnected()) {
-            network_.mqtt().publish(
-                std::string(app_cfg::MQTT_TOPIC_PREFIX) + "telemetry", msg);
-        }
-        // Also forward via WebSocket if connected
-        if (network_.ws().isConnected()) {
-            network_.ws().sendBinary(data, len);
-        }
-    });
-
-    // Wire BLE config → WiFi reconnect (like PTalk)
-    ble_.onConfigComplete([this](const BleConfig& cfg) {
-        ESP_LOGI(TAG, "BLE config received, saving & reconnecting");
-        network_.wifi().saveCredentials(cfg.ssid.c_str(), cfg.password.c_str());
-        ble_.stopAdvertising();
-        wifi_failed_ = false;
-
-        StateManager::instance().setConnectivity(ConnectivityState::CONNECTING_WIFI);
-        network_.wifi().connectWithCredentials(cfg.ssid.c_str(), cfg.password.c_str());
-    });
+    return true;
 }
 
-void AppController::start() {
-    ESP_LOGI(TAG, "Starting...");
-    StateManager::instance().setSystem(SystemState::RUNNING);
+void AppController::start()
+{
+    if (started.load()) return;
+    started.store(true);
 
-    uart_.startReceiveTask();
-    network_.start();
+    xTaskCreatePinnedToCore(&AppController::controllerTask, "AppCtrl", 4096, this, 4, &app_task, 0);
+    vTaskDelay(pdMS_TO_TICKS(10));
 
-    ESP_LOGI(TAG, "All modules started");
+    if (network) network->start();
+    if (spi) spi->start();
+    if (uart) uart->start();
+
+    ESP_LOGI(TAG, "AppController started");
 }
 
-void AppController::stop() {
-    network_.stop();
-    ESP_LOGI(TAG, "Stopped");
+void AppController::stop()
+{
+    if (!started.load()) return;
+    started.store(false);
+
+    if (uart) uart->stop();
+    if (network) network->stop();
+    if (spi) spi->stop();
+
+    vTaskDelay(pdMS_TO_TICKS(100));
+    app_task = nullptr;
+    ESP_LOGI(TAG, "AppController stopped");
 }
 
-void AppController::onConnectivityChanged(ConnectivityState s) {
-    ESP_LOGI(TAG, "Connectivity -> %s", toString(s));
+void AppController::reboot()
+{
+    ESP_LOGW(TAG, "Reboot requested");
+    esp_restart();
+}
 
-    // Notify STM32 about state changes
-    notifyStm32(std::string("STATE:") + toString(s) + "\n");
+void AppController::postEvent(event::AppEvent evt)
+{
+    if (!app_queue) return;
+    AppMessage msg{}; msg.type = AppMessage::Type::APP_EVENT; msg.app_event = evt;
+    xQueueSend(app_queue, &msg, 0);
+}
 
-    switch (s) {
-        case ConnectivityState::OFFLINE:
-            if (!wifi_failed_) {
-                wifi_failed_ = true;
-                // WiFi failed → start BLE provisioning (like PTalk fallback)
-                ESP_LOGW(TAG, "WiFi offline -> starting BLE provisioning");
-                StateManager::instance().setConnectivity(ConnectivityState::CONFIG_BLE);
-                ble_.startAdvertising();
+// === Emotion parsing ===
+
+state::EmotionState AppController::parseEmotionCode(const std::string& code)
+{
+    return NetworkManager::parseEmotionCode(code);
+}
+
+// === Task & Queue ===
+
+void AppController::controllerTask(void* param)
+{
+    static_cast<AppController*>(param)->processQueue();
+}
+
+void AppController::processQueue()
+{
+    ESP_LOGI(TAG, "Controller task started");
+    AppMessage msg{};
+
+    while (started.load()) {
+        if (xQueueReceive(app_queue, &msg, portMAX_DELAY) == pdTRUE) {
+            switch (msg.type) {
+            case AppMessage::Type::INTERACTION:
+                onInteractionStateChanged(msg.interaction_state, msg.interaction_source);
+                break;
+            case AppMessage::Type::CONNECTIVITY:
+                onConnectivityStateChanged(msg.connectivity_state);
+                break;
+            case AppMessage::Type::SYSTEM:
+                onSystemStateChanged(msg.system_state);
+                break;
+            case AppMessage::Type::APP_EVENT:
+                switch (msg.app_event) {
+                case event::AppEvent::REBOOT_REQUEST:
+                    reboot();
+                    break;
+                case event::AppEvent::SLEEP_REQUEST:
+                case event::AppEvent::WAKE_REQUEST:
+                    break;
+                }
+                break;
             }
-            break;
+        }
+    }
 
-        case ConnectivityState::ONLINE:
-            wifi_failed_ = false;
-            ble_.stopAdvertising();
-            ESP_LOGI(TAG, "Fully connected!");
-            break;
+    vTaskDelete(nullptr);
+}
 
-        default:
-            break;
+// === State callbacks ===
+
+void AppController::onInteractionStateChanged(state::InteractionState s, state::InputSource src)
+{
+    ESP_LOGI(TAG, "Interaction: %d (src=%d)", (int)s, (int)src);
+
+    // Forward state to S3 via UART
+    if (uart) {
+        uart->sendStatusUpdate(
+            (uint8_t)s,
+            (uint8_t)StateManager::instance().getConnectivityState(),
+            (uint8_t)StateManager::instance().getSystemState(),
+            (uint8_t)StateManager::instance().getEmotionState());
+    }
+
+    // WS immune mode during SPEAKING
+    if (network) {
+        network->setWSImmuneMode(s == state::InteractionState::SPEAKING);
     }
 }
 
-void AppController::notifyStm32(const std::string& msg) {
-    uart_.sendString(msg);
+void AppController::onConnectivityStateChanged(state::ConnectivityState s)
+{
+    ESP_LOGI(TAG, "Connectivity: %d", (int)s);
+
+    // Forward to S3 via UART
+    if (uart) {
+        uart->sendStatusUpdate(
+            (uint8_t)StateManager::instance().getInteractionState(),
+            (uint8_t)s,
+            (uint8_t)StateManager::instance().getSystemState(),
+            (uint8_t)StateManager::instance().getEmotionState());
+    }
 }
 
-// ============================================================================
-// Entry point (called from main.c)
-// ============================================================================
-
-extern "C" void app_init() {
-    auto& app = AppController::instance();
-    app.init();
-    app.start();
+void AppController::onSystemStateChanged(state::SystemState s)
+{
+    ESP_LOGI(TAG, "System: %d", (int)s);
 }

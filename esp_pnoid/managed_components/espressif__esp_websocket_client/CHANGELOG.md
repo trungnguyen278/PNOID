@@ -1,5 +1,92 @@
 # Changelog
 
+## [1.6.1](https://github.com/espressif/esp-protocols/commits/websocket-v1.6.1)
+
+### Bug Fixes
+
+- Fix race conditions, memory leak, and data loss ([23ca97d5](https://github.com/espressif/esp-protocols/commit/23ca97d5))
+    - Add state check in abort_connection to prevent double-close
+    - Fix memory leak: free errormsg_buffer on disconnect
+    - Reset connection state on reconnect to prevent stale data
+    - Implement lock ordering for separate TX lock mode
+    - Read buffered data immediately after connection to prevent data loss
+    - Added sdkconfig.ci.tx_lock config
+
+## [1.6.0](https://github.com/espressif/esp-protocols/commits/websocket-v1.6.0)
+
+### Features
+
+- add WEBSOCKET_EVENT_HEADER_RECEIVED (#827) ([18f0d028](https://github.com/espressif/esp-protocols/commit/18f0d028), [#715](https://github.com/espressif/esp-protocols/issues/715))
+- enhance example with docs, pytest setup, and standalone test server     - Add comprehensive README with TOC and quick start     - Add pytest setup and certificate generation scripts     - Add standalone WebSocket test server with TLS support     - Add troubleshooting and multiple testing approaches ([cad527d2](https://github.com/espressif/esp-protocols/commit/cad527d2))
+- Add websocket HTTP redirect ([ce1560ac](https://github.com/espressif/esp-protocols/commit/ce1560ac))
+
+### Bug Fixes
+
+- remove redundant timeout check in client task loop ([1e83bee4](https://github.com/espressif/esp-protocols/commit/1e83bee4))
+- fix PING timing - enable periodic PING during active traffic ([7f424325](https://github.com/espressif/esp-protocols/commit/7f424325))
+- Update linux build docs on required libs ([e52a5757](https://github.com/espressif/esp-protocols/commit/e52a5757))
+- clean up component dependencies - Remove unused 'json', 'nvs_flash', 'esp_stubs', dependency from Linux build configuration - Add cJSON dependency to target example's idf_component.yml ([d665e6f1](https://github.com/espressif/esp-protocols/commit/d665e6f1))
+- fix relying on asprintf() to NULL strp on failure ([54eb0027](https://github.com/espressif/esp-protocols/commit/54eb0027))
+- Update Remaining Websocket Echo Server (#893) ([18faeb3d](https://github.com/espressif/esp-protocols/commit/18faeb3d))
+- avoid long stopping time when waiting to auto-reconnect ([2432e41d](https://github.com/espressif/esp-protocols/commit/2432e41d))
+- Update Websocket Echo Server ([94bd5b07](https://github.com/espressif/esp-protocols/commit/94bd5b07))
+
+### Updated
+
+- ci(common): Update test component dir for IDFv6.0 ([18418c83](https://github.com/espressif/esp-protocols/commit/18418c83))
+
+## [1.5.0](https://github.com/espressif/esp-protocols/commits/websocket-v1.5.0)
+
+### Features
+
+- add separate tx lock for send and receive ([250eebf](https://github.com/espressif/esp-protocols/commit/250eebf))
+- add unregister event to websocket client ([ce16050](https://github.com/espressif/esp-protocols/commit/ce16050))
+- add ability to reconnect after close ([19891d8](https://github.com/espressif/esp-protocols/commit/19891d8))
+
+### Bug Fixes
+
+- release client-lock during WEBSOCKET_EVENT_DATA ([030cb75](https://github.com/espressif/esp-protocols/commit/030cb75))
+
+## [1.4.0](https://github.com/espressif/esp-protocols/commits/websocket-v1.4.0)
+
+### Features
+
+- Support DS peripheral for mutual TLS ([55385ec3](https://github.com/espressif/esp-protocols/commit/55385ec3))
+
+### Bug Fixes
+
+- wait for task on destroy ([42674b49](https://github.com/espressif/esp-protocols/commit/42674b49))
+- Fix pytest to verify client correctly ([9046af8f](https://github.com/espressif/esp-protocols/commit/9046af8f))
+- propagate error type ([eeeb9006](https://github.com/espressif/esp-protocols/commit/eeeb9006))
+- fix example buffer leak ([5219c39d](https://github.com/espressif/esp-protocols/commit/5219c39d))
+
+### Updated
+
+- chore(websocket): align structure members ([beb6e57e](https://github.com/espressif/esp-protocols/commit/beb6e57e))
+- chore(websocket): remove unused client variable ([15d3a01e](https://github.com/espressif/esp-protocols/commit/15d3a01e))
+
+## [1.3.0](https://github.com/espressif/esp-protocols/commits/websocket-v1.3.0)
+
+### Features
+
+- add events for begin/end thread ([d7fa24bc](https://github.com/espressif/esp-protocols/commit/d7fa24bc))
+- Make example to use certificate bundle ([aecf6f80](https://github.com/espressif/esp-protocols/commit/aecf6f80))
+- propagate esp_tls stack error and cert verify flags ([234f579b](https://github.com/espressif/esp-protocols/commit/234f579b))
+- Add option to set and use cert_common_name in Websocket client ([3a6720de](https://github.com/espressif/esp-protocols/commit/3a6720de))
+- adding support for `if_name` when using WSS transport ([333a6893](https://github.com/espressif/esp-protocols/commit/333a6893))
+- allow updating reconnect timeout for retry backoffs ([bd9f0627](https://github.com/espressif/esp-protocols/commit/bd9f0627))
+- allow using external tcp transport handle ([83ea2876](https://github.com/espressif/esp-protocols/commit/83ea2876))
+- adding support for `keep_alive_enable` when using WSS transport ([c728eae5](https://github.com/espressif/esp-protocols/commit/c728eae5))
+
+### Bug Fixes
+
+- Prevent crash on network disconnect during send ([a453ca1f](https://github.com/espressif/esp-protocols/commit/a453ca1f))
+- use proper interface to delete semaphore ([991ac40d](https://github.com/espressif/esp-protocols/commit/991ac40d))
+- Move client to different state when disconnecting ([0d8f2a6d](https://github.com/espressif/esp-protocols/commit/0d8f2a6d))
+- fix of websocket host example ([5ccc018a](https://github.com/espressif/esp-protocols/commit/5ccc018a))
+- don't get transport from the list if external transport is used ([9d4d5d2d](https://github.com/espressif/esp-protocols/commit/9d4d5d2d))
+- Fix locking issues of `esp_websocket_client_send_with_exact_opcode` API ([6393fcd7](https://github.com/espressif/esp-protocols/commit/6393fcd7))
+
 ## [1.2.3](https://github.com/espressif/esp-protocols/commits/websocket-v1.2.3)
 
 ### Features
