@@ -17,6 +17,7 @@ extern "C" {
 #include "audio_out.hpp"
 #include "pca9685.hpp"
 #include "icm20948.hpp"
+#include "humanoid.hpp"
 // #include "camera.hpp"   // Uncomment when camera is connected
 
 /* ============== External HAL handles from main.c ============== */
@@ -42,6 +43,7 @@ static AudioOut audioOut(i2s);
 static PCA9685  servo1(hi2c1, 0x41);   // PCA9685 #1 (A0 soldered)
 static PCA9685  servo2(hi2c1, 0x42);   // PCA9685 #2 (A1 soldered)
 static ICM20948 imu(hi2c1, 0x68);      // ICM-20948 IMU
+static Humanoid robot(servo1, servo2); // Humanoid: left=PCA#1, right=PCA#2
 // static Camera  cam(hdcmi, hi2c2);   // Uncomment when camera connected
 
 /* ============== Application ============== */
@@ -91,12 +93,9 @@ void init() {
             LOGI(TAG, "  0x%02X found", a);
     }
 
-    /* Init PCA9685 servo drivers */
-    if (servo1.init() != PCA9685::Status::OK) {
-        LOGE(TAG, "PCA9685 #1 (0x41) init failed!");
-    }
-    if (servo2.init() != PCA9685::Status::OK) {
-        LOGE(TAG, "PCA9685 #2 (0x42) init failed!");
+    /* Init Humanoid (PCA9685 x2 + joint config) */
+    if (robot.init() != Humanoid::Status::OK) {
+        LOGE(TAG, "Humanoid init failed!");
     }
 
     /* Init ICM-20948 IMU */
@@ -108,22 +107,7 @@ void init() {
 }
 
 void run() {
-    /* Set cả 2 PCA: mỗi kênh hold 0→90→180 lặp lại */
-    static const uint16_t angles[] = { 0, 90, 180 };
-    LOGI(TAG, "--- PCA9685 #1 (0x41) ---");
-    for (uint8_t ch = 0; ch < 16; ch++) {
-        uint16_t angle = angles[ch % 3];
-        servo1.setAngle(ch, angle);
-        LOGI(TAG, "  CH%u = %u deg", ch, angle);
-    }
-    LOGI(TAG, "--- PCA9685 #2 (0x42) ---");
-    for (uint8_t ch = 0; ch < 16; ch++) {
-        uint16_t angle = angles[ch % 3];
-        servo2.setAngle(ch, angle);
-        LOGI(TAG, "  CH%u = %u deg", ch, angle);
-    }
-
-    /* Main loop: poll BNO085 */
+    /* Main loop: read IMU */
     uint32_t lastImuLog = 0;
     while (1) {
         BSP::ledToggle();
@@ -131,14 +115,10 @@ void run() {
         if ((HAL_GetTick() - lastImuLog) >= 500) {
             if (imu.read() == ICM20948::Status::OK) {
                 auto e = imu.getEuler();
-                auto a = imu.getAccel();
-                LOGI(TAG, "R=%d.%d P=%d.%d Y=%d.%d T=%d.%d",
+                LOGI(TAG, "R=%d.%d P=%d.%d Y=%d.%d",
                      (int)e.roll, abs((int)(e.roll * 10) % 10),
                      (int)e.pitch, abs((int)(e.pitch * 10) % 10),
-                     (int)e.yaw, abs((int)(e.yaw * 10) % 10),
-                     (int)imu.getTemp(), abs((int)(imu.getTemp() * 10) % 10));
-                LOGI(TAG, "Ax=%d Ay=%d Az=%d mg",
-                     (int)(a.x * 1000), (int)(a.y * 1000), (int)(a.z * 1000));
+                     (int)e.yaw, abs((int)(e.yaw * 10) % 10));
             }
             lastImuLog = HAL_GetTick();
         }
