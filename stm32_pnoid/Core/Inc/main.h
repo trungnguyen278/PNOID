@@ -73,6 +73,7 @@ void Error_Handler(void);
 #define LCD_D_C_GPIO_Port GPIOB
 #define BNO_INT_Pin GPIO_PIN_7
 #define BNO_INT_GPIO_Port GPIOE
+#define BNO_INT_EXTI_IRQn EXTI9_5_IRQn
 #define BNO_RST_Pin GPIO_PIN_8
 #define BNO_RST_GPIO_Port GPIOE
 #define SPI4_CS_Pin GPIO_PIN_11

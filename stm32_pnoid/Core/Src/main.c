@@ -864,11 +864,11 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOD, MUX_S4_Pin|MUX_S0_Pin|MUX_S1_Pin|MUX_S2_Pin
                           |MUX_S3_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : K1_Pin BNO_INT_Pin */
-  GPIO_InitStruct.Pin = K1_Pin|BNO_INT_Pin;
+  /*Configure GPIO pin : K1_Pin */
+  GPIO_InitStruct.Pin = K1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+  HAL_GPIO_Init(K1_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LED_D2_Pin CAM_PWDN_Pin */
   GPIO_InitStruct.Pin = LED_D2_Pin|CAM_PWDN_Pin;
@@ -896,6 +896,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : BNO_INT_Pin */
+  GPIO_InitStruct.Pin = BNO_INT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(BNO_INT_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : BNO_RST_Pin */
   GPIO_InitStruct.Pin = BNO_RST_Pin;
@@ -930,6 +936,10 @@ static void MX_GPIO_Init(void)
 
   /*AnalogSwitch Config */
   HAL_SYSCFG_AnalogSwitchConfig(SYSCFG_SWITCH_PA1, SYSCFG_SWITCH_PA1_CLOSE);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(BNO_INT_EXTI_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(BNO_INT_EXTI_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
