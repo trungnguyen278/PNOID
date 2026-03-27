@@ -19,6 +19,7 @@
 
 - Module mounted **upside-down** (IC facing down)
 - Firmware compensates by flipping X and Z axes in `icm20948.cpp::read()`
+- **Hệ tọa độ cảm biến (sau flip):** Z hướng xuống, Y sang trái, X về sau
 - Standing upright: Az ≈ +960mg, Roll ≈ 0, Pitch ≈ 0
 - **Temperature reads ~43°C** — this is die temperature, NOT ambient. Normal.
 - Yaw=0 if magnetometer not calibrated
