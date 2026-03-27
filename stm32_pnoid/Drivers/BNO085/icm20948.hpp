@@ -74,6 +74,7 @@ private:
     static constexpr uint8_t B0_PWR_MGMT_1   = 0x06;
     static constexpr uint8_t B0_PWR_MGMT_2   = 0x07;
     static constexpr uint8_t B0_INT_PIN_CFG  = 0x0F;
+    static constexpr uint8_t B0_INT_ENABLE_1 = 0x11;
     static constexpr uint8_t B0_ACCEL_XOUT_H = 0x2D;
 
     /* Bank 2 registers */
