@@ -152,35 +152,71 @@ Humanoid::Status Humanoid::init()
      * Limits can be tuned per joint after calibration
      */
 
-    /* Left leg — PCA#1, CH0-5 */
+    /*
+     * Servo mapping (xác nhận thực tế):
+     *
+     * Robot angle convention (tất cả joint):
+     *   0° = tư thế đứng thẳng (home)
+     *   Dương (+) = hướng "mở" / "lên" / "ra ngoài":
+     *     HipYaw   + = xoay chân ra ngoài
+     *     HipRoll  + = dạng chân ra ngoài
+     *     HipPitch + = nhấc đùi lên trước
+     *     KneePitch + = gập gối
+     *     AnklePitch + = gập mũi chân lên (dorsiflexion)
+     *     AnkleRoll + = nghiêng lòng bàn chân ra ngoài
+     *
+     * servo = 90 + robotAngle * direction + offset
+     *
+     * LEFT (servo1):
+     *   CH0 HipYaw:    90=giữa, 0=ra ngoài, 180=vào trong    → dir=-1
+     *   CH1 HipRoll:   90=giữa, 180=dạng ra ngoài(trái)      → dir=+1
+     *   CH2 HipPitch:  90=giữa, 180=co về sau                 → dir=-1
+     *   CH3 KneePitch: 170=thẳng, giảm=co gối                 → dir=-1, offset=+80
+     *   CH4 AnklePitch:90=thẳng, 180=mũi chân lên             → dir=+1
+     *   CH5 AnkleRoll: 90=thẳng, 180=lòng bàn chân ra ngoài  → dir=+1
+     *
+     * RIGHT (servo2):
+     *   CH0 HipYaw:    90=giữa, 180=ra ngoài(phải)            → dir=+1
+     *   CH1 HipRoll:   90=giữa, 180=nghiêng vào trong(trái)   → dir=-1
+     *   CH2 HipPitch:  90=giữa, 180=nhấc chân lên             → dir=+1
+     *   CH3 KneePitch: 0=thẳng, tăng=co gối                   → dir=+1, offset=-90
+     *   CH4 AnklePitch:90=giữa, 0=mũi chân lên                → dir=-1
+     *   CH5 AnkleRoll: 90=giữa, 180=lòng bàn chân vào trong   → dir=-1
+     *
+     * TORSO (servo2):
+     *   CH8 TorsoYaw:  90=giữa, 0=phải, 180=trái              → dir=+1
+     *   CH9 TorsoRoll: 90=giữa, 0=nghiêng trái, 180=phải, ±20° → dir=+1
+     */
+
+    /* Left leg — PCA#1 (0x41), CH0-5 */
     JointConfig leftCfg[Leg::NUM_JOINTS] = {
     /*  pca          ch  min   max  home  dir  offset */
-        {&pcaLeft_,  0,  -45,  45,   0,  +1,   0},  // HipYaw
-        {&pcaLeft_,  1,  -30,  30,   0,  +1,   0},  // HipRoll
-        {&pcaLeft_,  2,  -90,  45,   0,  +1,   0},  // HipPitch
-        {&pcaLeft_,  3,    0,  135,  0,  +1,   0},  // KneePitch
-        {&pcaLeft_,  4,  -45,  45,   0,  +1,   0},  // AnklePitch
-        {&pcaLeft_,  5,  -30,  30,   0,  +1,   0},  // AnkleRoll
+        {&pcaLeft_,  0,  -45,  45,   0,  -1,  -5},  // HipYaw   (0=out,180=in)
+        {&pcaLeft_,  1,  -30,  30,   0,  +1,   0},  // HipRoll  (180=out left)
+        {&pcaLeft_,  2,  -45,  90,   0,  -1,   0},  // HipPitch (180=back → -1)
+        {&pcaLeft_,  3,    0,  80,   0,  -1, +80},  // KneePitch(170=straight)
+        {&pcaLeft_,  4,  -45,  45,   0,  +1,   0},  // AnklePitch(180=toe up)
+        {&pcaLeft_,  5,  -30,  30,   0,  +1,   0},  // AnkleRoll(180=sole out)
     };
     leftLeg.configure(leftCfg);
 
-    /* Right leg — PCA#2, CH0-5 (mirrored: Roll and Yaw reversed) */
+    /* Right leg — PCA#2 (0x42), CH0-5 */
     JointConfig rightCfg[Leg::NUM_JOINTS] = {
     /*  pca           ch  min   max  home  dir  offset */
-        {&pcaRight_,  0,  -45,  45,   0,  -1,   0},  // HipYaw (mirrored)
-        {&pcaRight_,  1,  -30,  30,   0,  -1,   0},  // HipRoll (mirrored)
-        {&pcaRight_,  2,  -90,  45,   0,  +1,   0},  // HipPitch
-        {&pcaRight_,  3,    0,  135,  0,  +1,   0},  // KneePitch
-        {&pcaRight_,  4,  -45,  45,   0,  +1,   0},  // AnklePitch
-        {&pcaRight_,  5,  -30,  30,   0,  -1,   0},  // AnkleRoll (mirrored)
+        {&pcaRight_,  0,  -45,  45,   0,  +1,   0},  // HipYaw   (180=out right)
+        {&pcaRight_,  1,  -30,  30,   0,  -1,   0},  // HipRoll  (180=in → -1)
+        {&pcaRight_,  2,  -45,  90,   0,  +1,   0},  // HipPitch (180=up → +1)
+        {&pcaRight_,  3,    0,  80,   0,  +1, -90},  // KneePitch(0=straight)
+        {&pcaRight_,  4,  -45,  45,   0,  -1,   0},  // AnklePitch(0=toe up → -1)
+        {&pcaRight_,  5,  -30,  30,   0,  -1,   0},  // AnkleRoll(180=sole in → -1)
     };
     rightLeg.configure(rightCfg);
 
-    /* Torso — PCA#1, CH6-7 */
+    /* Torso — PCA#2 (0x42), CH8-9 */
     JointConfig torsoCfg[Torso::NUM_JOINTS] = {
-    /*  pca          ch  min   max  home  dir  offset */
-        {&pcaLeft_,  6,  -45,  45,   0,  +1,   0},  // TorsoYaw
-        {&pcaLeft_,  7,  -30,  30,   0,  +1,   0},  // TorsoPitch
+    /*  pca           ch  min   max  home  dir  offset */
+        {&pcaRight_,  8,  -45,  45,   0,  +1,   0},  // TorsoYaw  (180=left)
+        {&pcaRight_,  9,  -20,  20,   0,  +1,   0},  // TorsoRoll (180=right, ±20°)
     };
     torso.configure(torsoCfg);
 
