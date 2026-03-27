@@ -46,6 +46,10 @@ static ICM20948 imu(hi2c1, 0x68);      // ICM-20948 IMU
 static Humanoid robot(servo1, servo2); // Humanoid: left=PCA#1, right=PCA#2
 // static Camera  cam(hdcmi, hi2c2);   // Uncomment when camera connected
 
+/* ============== IMU Data-Ready Flag (set by EXTI) ============== */
+
+static volatile bool imuDataReady = false;
+
 /* ============== Application ============== */
 
 static const char *TAG = "APP";
@@ -107,23 +111,143 @@ void init() {
 }
 
 void run() {
-    /* Main loop: read IMU */
-    uint32_t lastImuLog = 0;
+    /*
+     * Bent-knee stance + IMU stabilizer
+     *
+     * Tư thế cơ sở (base pose):
+     *   KneePitch  = 25°   gập gối
+     *   HipPitch   = 12°   nghiêng đùi ra trước
+     *   AnklePitch = 13°   bù mũi chân
+     *
+     * Stabilizer:
+     *   Complementary filter (gyro + accel) → estimated roll, pitch
+     *   Bù vào ankle (nhanh) + hip (chậm) để giữ roll≈0, pitch≈0
+     */
+
+    /* ── Base pose ── */
+    const int16_t BASE_KNEE  = 25;
+    const int16_t BASE_HIP_P = 12;
+    const int16_t BASE_ANK_P = 13;
+
+    /* ── Stabilizer gains ── */
+    const float Kp_pitch = 0.8f;   // deg correction / deg error
+    const float Kd_pitch = 0.05f;  // deg correction / (deg/s)
+    const float Kp_roll  = 1.0f;
+    const float Kd_roll  = 0.06f;
+
+    /* ankle nhận 60% correction, hip 40% */
+    const float ANKLE_SHARE = 0.6f;
+    const float HIP_SHARE   = 0.4f;
+
+    /* Complementary filter */
+    const float ALPHA = 0.98f;     // gyro trust (0.98 = tau ≈ 1s)
+    float est_roll  = 0.0f;
+    float est_pitch = 0.0f;
+
+    /* Correction limits */
+    const float CORR_MAX = 12.0f;  // deg
+
+    uint32_t lastTick = HAL_GetTick();
+    uint32_t lastLog  = 0;
+
+    /* Set base pose */
+    LOGI(TAG, "Setting bent-knee stance...");
+    robot.torso.setJoint(Torso::Yaw,  0);
+    robot.torso.setJoint(Torso::Roll, 0);
+
+    auto setBasePose = [&](Leg &leg) {
+        leg.setJoint(Leg::HipYaw,     0);
+        leg.setJoint(Leg::HipRoll,    0);
+        leg.setJoint(Leg::HipPitch,   BASE_HIP_P);
+        leg.setJoint(Leg::KneePitch,  BASE_KNEE);
+        leg.setJoint(Leg::AnklePitch, BASE_ANK_P);
+        leg.setJoint(Leg::AnkleRoll,  0);
+    };
+    setBasePose(robot.leftLeg);
+    setBasePose(robot.rightLeg);
+
+    HAL_Delay(500);  // đợi servo về vị trí
+
+    /* Init filter từ accel hiện tại */
+    if (imu.read() == ICM20948::Status::OK) {
+        auto e = imu.getEuler();
+        est_roll  = e.roll;
+        est_pitch = e.pitch;
+    }
+
+    LOGI(TAG, "Stabilizer running (Kp_p=%.1f Kp_r=%.1f)",
+         (double)Kp_pitch, (double)Kp_roll);
+
+    /* ── Main control loop ── */
     while (1) {
+        /* Wait for IMU data-ready interrupt (PE7 falling edge) */
+        if (!imuDataReady) {
+            HAL_Delay(1);
+            continue;
+        }
+        imuDataReady = false;
+
+        uint32_t now = HAL_GetTick();
+        float dt = (now - lastTick) * 0.001f;
+        if (dt < 0.001f) dt = 0.001f;  // safety clamp
+        lastTick = now;
+
         BSP::ledToggle();
 
-        if ((HAL_GetTick() - lastImuLog) >= 500) {
-            if (imu.read() == ICM20948::Status::OK) {
-                auto e = imu.getEuler();
-                LOGI(TAG, "R=%d.%d P=%d.%d Y=%d.%d",
-                     (int)e.roll, abs((int)(e.roll * 10) % 10),
-                     (int)e.pitch, abs((int)(e.pitch * 10) % 10),
-                     (int)e.yaw, abs((int)(e.yaw * 10) % 10));
-            }
-            lastImuLog = HAL_GetTick();
-        }
+        /* 1. Đọc IMU (data guaranteed ready by INT pin) */
+        if (imu.read() != ICM20948::Status::OK) continue;
 
-        HAL_Delay(10);
+        auto accel = imu.getAccel();
+        auto gyro  = imu.getGyro();
+
+        /* 2. Complementary filter */
+        float accel_roll  = atan2f(accel.y, accel.z) * 57.2958f;
+        float accel_pitch = atan2f(-accel.x,
+                            sqrtf(accel.y * accel.y + accel.z * accel.z)) * 57.2958f;
+
+        est_roll  = ALPHA * (est_roll  + gyro.x * dt) + (1.0f - ALPHA) * accel_roll;
+        est_pitch = ALPHA * (est_pitch + gyro.y * dt) + (1.0f - ALPHA) * accel_pitch;
+
+        /* 3. Tính correction (target = 0° cho cả roll và pitch) */
+        float corr_pitch = Kp_pitch * (-est_pitch) + Kd_pitch * (-gyro.y);
+        float corr_roll  = Kp_roll  * (-est_roll)  + Kd_roll  * (-gyro.x);
+
+        /* Clamp */
+        if (corr_pitch >  CORR_MAX) corr_pitch =  CORR_MAX;
+        if (corr_pitch < -CORR_MAX) corr_pitch = -CORR_MAX;
+        if (corr_roll  >  CORR_MAX) corr_roll  =  CORR_MAX;
+        if (corr_roll  < -CORR_MAX) corr_roll  = -CORR_MAX;
+
+        /* 4. Phân bổ vào khớp */
+        int16_t ankle_pitch_corr = (int16_t)(corr_pitch * ANKLE_SHARE);
+        int16_t hip_pitch_corr   = (int16_t)(corr_pitch * HIP_SHARE);
+        int16_t ankle_roll_corr  = (int16_t)(corr_roll  * ANKLE_SHARE);
+        int16_t hip_roll_corr    = (int16_t)(corr_roll  * HIP_SHARE);
+
+        /* 5. Gửi servo = base + correction */
+        /* Chân trái */
+        robot.leftLeg.setJoint(Leg::AnklePitch, BASE_ANK_P + ankle_pitch_corr);
+        robot.leftLeg.setJoint(Leg::HipPitch,   BASE_HIP_P - hip_pitch_corr);
+        robot.leftLeg.setJoint(Leg::AnkleRoll,  ankle_roll_corr);
+        robot.leftLeg.setJoint(Leg::HipRoll,    hip_roll_corr);
+
+        /* Chân phải — cùng correction (direction trong config lo mirror) */
+        robot.rightLeg.setJoint(Leg::AnklePitch, BASE_ANK_P + ankle_pitch_corr);
+        robot.rightLeg.setJoint(Leg::HipPitch,   BASE_HIP_P - hip_pitch_corr);
+        robot.rightLeg.setJoint(Leg::AnkleRoll,  ankle_roll_corr);
+        robot.rightLeg.setJoint(Leg::HipRoll,    hip_roll_corr);
+
+        /* Torso bù ngược roll */
+        robot.torso.setJoint(Torso::Roll, (int16_t)(-corr_roll * 0.3f));
+
+        /* 6. Log mỗi 500ms */
+        if ((now - lastLog) >= 500) {
+            LOGI(TAG, "R=%d.%d P=%d.%d  cr=%d cp=%d",
+                 (int)est_roll, abs((int)(est_roll * 10) % 10),
+                 (int)est_pitch, abs((int)(est_pitch * 10) % 10),
+                 (int)corr_roll, (int)corr_pitch);
+            lastLog = now;
+        }
     }
 }
 
@@ -139,6 +263,12 @@ void App_Init(void) {
 
 void App_Main(void) {
     App::run();
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+    if (GPIO_Pin == BNO_INT_Pin) {
+        imuDataReady = true;
+    }
 }
 
 } // extern "C"
