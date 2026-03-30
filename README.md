@@ -2,6 +2,7 @@
 
 ## Overview
 <!-- Mô tả ngắn về dự án -->
+![PNOID Robot](docs/images/PNOID.jpg)
 
 ## Hardware
 - **MCU**: STM32H743VIT6 (Cortex-M7, 480MHz)
