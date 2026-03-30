@@ -119,8 +119,8 @@ ICM20948::Status ICM20948::init()
 
     /* Enable data-ready interrupt on INT1 pin (active-low, push-pull, pulse 50us) */
     st = setBank(0);                                    if (st != Status::OK) return Status::ErrInit;
-    st = writeReg(B0_INT_PIN_CFG, 0x30);               if (st != Status::OK) return Status::ErrInit;
-    // 0x30 = INT active low, push-pull, pulse, clear on any read
+    st = writeReg(B0_INT_PIN_CFG, 0x90);               if (st != Status::OK) return Status::ErrInit;
+    // 0x90 = bit7: active-LOW, bit4: clear on any read, push-pull, pulse 50us
     st = writeReg(B0_INT_ENABLE_1, 0x01);              if (st != Status::OK) return Status::ErrInit;
     // 0x01 = RAW_DATA_0_RDY_EN
 
