@@ -192,11 +192,11 @@ Humanoid::Status Humanoid::init()
     JointConfig leftCfg[Leg::NUM_JOINTS] = {
     /*  pca          ch  min   max  home  dir  offset */
         {&pcaLeft_,  0,  -45,  45,   0,  -1,  -5},  // HipYaw   (0=out,180=in)
-        {&pcaLeft_,  1,  -30,  30,   0,  +1,   0},  // HipRoll  (180=out left)
+        {&pcaLeft_,  1,  -30,  30,   0,  +1, -10},  // HipRoll  (180=out left, -10° bù rạng)
         {&pcaLeft_,  2,  -45,  90,   0,  -1,   0},  // HipPitch (180=back → -1)
         {&pcaLeft_,  3,    0,  80,   0,  -1, +80},  // KneePitch(170=straight)
         {&pcaLeft_,  4,  -45,  45,   0,  +1,   0},  // AnklePitch(180=toe up)
-        {&pcaLeft_,  5,  -30,  30,   0,  +1,   0},  // AnkleRoll(180=sole out)
+        {&pcaLeft_,  5,  -30,  30,   0,  +1, -10},  // AnkleRoll(180=sole out, -10° nghiêng vào)
     };
     leftLeg.configure(leftCfg);
 
@@ -206,9 +206,9 @@ Humanoid::Status Humanoid::init()
         {&pcaRight_,  0,  -45,  45,   0,  +1,   0},  // HipYaw   (180=out right)
         {&pcaRight_,  1,  -30,  30,   0,  -1,   0},  // HipRoll  (180=in → -1)
         {&pcaRight_,  2,  -45,  90,   0,  +1,   0},  // HipPitch (180=up → +1)
-        {&pcaRight_,  3,    0,  80,   0,  +1, -90},  // KneePitch(0=straight)
-        {&pcaRight_,  4,  -45,  45,   0,  -1,   0},  // AnklePitch(0=toe up → -1)
-        {&pcaRight_,  5,  -30,  30,   0,  -1,   0},  // AnkleRoll(180=sole in → -1)
+        {&pcaRight_,  3,    0,  80,   0,  +1, -85},  // KneePitch(0=straight, giảm co)
+        {&pcaRight_,  4,  -45,  45,   0,  -1, -25},  // AnklePitch(bù nghiêng sau)
+        {&pcaRight_,  5,  -30,  30,   0,  -1, -10},  // AnkleRoll(180=sole in, -10° nghiêng vào)
     };
     rightLeg.configure(rightCfg);
 
