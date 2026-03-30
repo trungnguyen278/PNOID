@@ -21,6 +21,9 @@ build/
 # Claude Code
 .claude/
 
+# VSCode
+.vscode/
+
 # PlatformIO
 esp_pnoid/.pio/
 esp_pnoid/sdkconfig.esp32c5
